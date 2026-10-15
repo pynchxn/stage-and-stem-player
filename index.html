@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stage Recordings Player</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Layout: one centred column — a "now playing" stage panel with waveform, then the archive list of past sets beneath it. Single dark look by design (Stage mini-site). */
+  :root {
+    --bg: #08080f;
+    --panel: #0f0f18;
+    --line: rgba(201,169,110,0.16);
+    --line-strong: rgba(201,169,110,0.45);
+    --gold: #c9a96e;
+    --gold-soft: rgba(201,169,110,0.12);
+    --ink: #f5f2ed;
+    --ink-2: rgba(245,242,237,0.66);
+    --ink-3: rgba(245,242,237,0.40);
+    --wave-idle: rgba(245,242,237,0.16);
+    --display: 'Cormorant Garamond', 'Cormorant', Georgia, 'Times New Roman', serif;
+    --body: 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+    color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-weight: 300;
+    padding-inline: 16px;
+    padding-block: 3rem 4rem;
+    position: relative;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: absolute;
+    top: -120px; left: 50%;
+    transform: translateX(-50%);
+    width: min(760px, 120vw); height: 520px;
+    background: radial-gradient(ellipse, rgba(201,169,110,0.10) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .wrap { position: relative; max-width: 720px; margin: 0 auto; display: grid; gap: 2.4rem; }
+
+  header { text-align: center; display: grid; gap: 0.7rem; }
+  .eyebrow {
+    font-size: 0.62rem; letter-spacing: 0.42em; text-transform: uppercase; color: var(--gold);
+  }
+  h1 {
+    margin: 0;
+    font-family: var(--display); font-weight: 300; font-style: italic;
+    font-size: clamp(2.2rem, 7vw, 3.2rem); letter-spacing: 0.02em; line-height: 1.05;
+    text-wrap: balance;
+  }
+  .lede {
+    margin: 0 auto; max-width: 46ch;
+    font-family: var(--display); font-size: 1.15rem; line-height: 1.6; color: var(--ink-2);
+  }
+
+  /* Now playing */
+  .stage {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 1.8rem clamp(1.1rem, 4vw, 2.2rem) 1.6rem;
+    display: grid; gap: 1.3rem;
+  }
+  .stage::before, .stage::after {
+    content: ''; position: absolute; width: 20px; height: 20px;
+    border: solid var(--gold); opacity: 0.5;
+  }
+  .stage::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .stage::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+  .np-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+  .np-text { min-width: 0; display: grid; gap: 0.35rem; }
+  .np-label { font-size: 0.58rem; letter-spacing: 0.4em; text-transform: uppercase; color: var(--ink-3); display: flex; align-items: center; gap: 0.6rem; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); opacity: 0.35; }
+  .playing .live-dot { opacity: 1; box-shadow: 0 0 0 0 rgba(201,169,110,0.6); animation: pulse 1.8s infinite; }
+  .np-performer {
+    margin: 0; font-family: var(--display); font-weight: 400;
+    font-size: clamp(1.7rem, 5.5vw, 2.3rem); line-height: 1.1; text-wrap: balance;
+  }
+  .np-set { margin: 0; font-family: var(--display); font-style: italic; font-size: 1.1rem; color: var(--ink-2); }
+  .np-meta {
+    font-size: 0.66rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold);
+    border: 1px solid var(--line); padding: 0.45rem 0.8rem; white-space: nowrap;
+  }
+
+  .wave-wrap { position: relative; cursor: pointer; touch-action: none; }
+  .wave-wrap:focus-visible { outline: 1px solid var(--gold); outline-offset: 6px; }
+  .wave-wrap { padding-block: 12px; }
+  .track { position: relative; height: 3px; background: var(--wave-idle); transition: height .2s; }
+  .wave-wrap:hover .track { height: 5px; }
+  .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--gold); }
+  .thumb {
+    position: absolute; top: 50%; left: 0; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--gold); transform: translate(-50%, -50%); box-shadow: 0 0 0 4px var(--gold-soft);
+  }
+
+  .controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .btn {
+    appearance: none; background: none; border: 1px solid var(--line); color: var(--ink);
+    width: 42px; height: 42px; display: grid; place-items: center; cursor: pointer;
+    transition: border-color .25s, color .25s, background .25s;
+  }
+  .btn:hover { border-color: var(--line-strong); color: var(--gold); }
+  .btn:focus-visible { outline: 1px solid var(--gold); outline-offset: 3px; }
+  .btn.play {
+    width: 58px; height: 58px; border-radius: 50%;
+    border-color: var(--gold); background: var(--gold-soft); color: var(--gold);
+  }
+  .btn.play:hover { background: rgba(201,169,110,0.22); }
+  .btn svg { width: 16px; height: 16px; }
+  .btn.play svg { width: 20px; height: 20px; }
+  .time {
+    margin-left: auto; font-size: 0.78rem; letter-spacing: 0.08em; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .time b { color: var(--ink); font-weight: 500; }
+  .vol { display: flex; align-items: center; gap: 0.5rem; color: var(--ink-3); }
+  .mute {
+    appearance: none; background: none; border: 0; padding: 6px; margin: -6px; cursor: pointer;
+    color: var(--ink-3); display: grid; place-items: center; transition: color .25s;
+  }
+  .mute:hover { color: var(--gold); }
+  .mute:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+  .mute svg { width: 17px; height: 17px; }
+  .vol.muted .mute { color: var(--gold); }
+  .vol.muted input[type=range] { opacity: 0.35; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 84px; height: 2px; background: var(--line-strong); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; background: var(--gold); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--gold); cursor: pointer; }
+  input[type=range]:focus-visible { outline: 1px solid var(--gold); outline-offset: 6px; }
+
+  /* Turntable */
+  .np-head { flex-wrap: nowrap; align-items: center; }
+  .np-text { flex: 1; }
+  .deck { position: relative; flex: none; width: 156px; height: 146px; }
+  .platter {
+    position: absolute; left: -6px; top: 0; width: 144px; height: 144px; border-radius: 50%;
+    background: radial-gradient(circle, #1b1a22 0 60%, #0c0c12 70%);
+    box-shadow: inset 0 0 0 1px rgba(201,169,110,0.18), 0 10px 30px rgba(0,0,0,0.6);
+  }
+  .disc {
+    position: absolute; left: 0; top: 6px; width: 132px; height: 132px; border-radius: 50%;
+    background:
+      repeating-radial-gradient(circle at 50% 50%, #0d0d10 0 1.1px, #1c1b21 1.1px 2.4px),
+      #111;
+    animation: spin 1.8s linear infinite; animation-play-state: paused;
+  }
+  .playing .disc { animation-play-state: running; }
+  .disc-label {
+    position: absolute; inset: 31%; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #dcc08c, var(--gold) 55%, #a8884f);
+    display: grid; place-items: center; align-content: center; gap: 9px;
+    color: #1a140a; text-align: center;
+    box-shadow: 0 0 0 2px #0d0d10, 0 0 0 3px rgba(201,169,110,0.25);
+  }
+  .disc-label b { font-family: var(--display); font-style: italic; font-weight: 500; font-size: 0.95rem; line-height: 1; }
+  .disc-label small { font-size: 0.32rem; letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase; }
+  .disc-label::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
+    border-radius: 50%; background: #0d0d10; box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
+  }
+  .sheen {
+    position: absolute; left: 0; top: 6px; width: 132px; height: 132px; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(from 20deg, transparent 0deg, rgba(255,255,255,0.09) 25deg, transparent 55deg,
+      transparent 180deg, rgba(255,255,255,0.06) 205deg, transparent 235deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 31%, #000 32%);
+            mask: radial-gradient(circle, transparent 0 31%, #000 32%);
+  }
+  .arm {
+    position: absolute; left: 120px; top: -8px; width: 40px; height: 112px; overflow: visible;
+    transform-origin: 28px 12px; transform: rotate(-6deg);
+    transition: transform .9s cubic-bezier(.45,.05,.25,1);
+    filter: drop-shadow(0 4px 4px rgba(0,0,0,0.6));
+  }
+  .rpm {
+    position: absolute; right: 0; bottom: 0; font-size: 0.5rem; letter-spacing: 0.24em; color: var(--ink-3);
+    text-transform: uppercase;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 520px) {
+    .deck { transform: scale(0.72); transform-origin: right center; margin-left: -44px; }
+  }
+
+  /* Archive */
+  .archive { display: grid; gap: 0.9rem; }
+  .archive-head { display: flex; align-items: center; gap: 1rem; }
+  .archive-head h2 {
+    margin: 0; font-size: 0.62rem; font-weight: 500; letter-spacing: 0.42em; text-transform: uppercase; color: var(--gold);
+    white-space: nowrap;
+  }
+  .archive-head::after { content: ''; flex: 1; height: 1px; background: linear-gradient(to right, var(--line-strong), transparent); }
+
+  ol { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .row {
+    display: grid; grid-template-columns: 3.4rem 1fr auto; align-items: center; gap: 1.1rem;
+    width: 100%; padding: 1rem 0.6rem; background: none; border: 0; border-bottom: 1px solid var(--line);
+    color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .25s;
+  }
+  .row:hover { background: rgba(245,242,237,0.025); }
+  .row:focus-visible { outline: 1px solid var(--gold); outline-offset: -1px; }
+  .date { text-align: center; border-right: 1px solid var(--line); padding-right: 1rem; display: grid; }
+  .date .d { font-family: var(--display); font-size: 1.7rem; line-height: 1; font-variant-numeric: lining-nums; }
+  .date .m { font-size: 0.56rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ink-3); margin-top: 0.25rem; }
+  .info { min-width: 0; display: grid; gap: 0.2rem; }
+  .info .p { font-family: var(--display); font-size: 1.25rem; line-height: 1.2; }
+  .info .s { font-size: 0.72rem; letter-spacing: 0.04em; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .right { display: flex; align-items: center; gap: 0.9rem; }
+  .tag {
+    font-size: 0.56rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-3);
+    border: 1px solid var(--line); padding: 0.3rem 0.55rem;
+  }
+  .dur { font-size: 0.74rem; color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 2.6rem; text-align: right; }
+  .row.current .p { color: var(--gold); }
+  .row.current .date .d { color: var(--gold); }
+  .eq { display: none; gap: 2px; align-items: flex-end; height: 12px; }
+  .eq i { width: 2px; background: var(--gold); height: 30%; }
+  .playing .row.current .eq { display: flex; }
+  .playing .row.current .eq i { animation: eq .9s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: -.3s !important; }
+  .eq i:nth-child(3) { animation-delay: -.6s !important; }
+
+  .note {
+    font-size: 0.66rem; letter-spacing: 0.06em; line-height: 1.7; color: var(--ink-3); text-align: center;
+    max-width: 52ch; margin: 0 auto;
+  }
+  .note strong { color: var(--ink-2); font-weight: 500; }
+
+  @keyframes eq { 0%,100% { height: 25%; } 50% { height: 100%; } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(201,169,110,0.55); } 70% { box-shadow: 0 0 0 8px rgba(201,169,110,0); } 100% { box-shadow: 0 0 0 0 rgba(201,169,110,0); } }
+
+  @media (max-width: 520px) {
+    .row { grid-template-columns: 2.8rem 1fr auto; gap: 0.8rem; padding-inline: 0.2rem; }
+    .date { padding-right: 0.7rem; }
+    .tag { display: none; }
+    .vol input[type=range] { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <span class="eyebrow">Stage &amp; Stem · Recorded Live</span>
+    <h1>From the Stage</h1>
+    <p class="lede">Sets recorded in the room at 199–201 Richmond Road. Press play and pull up a chair.</p>
+  </header>
+
+  <section class="stage" aria-label="Now playing">
+    <div class="np-head">
+      <div class="np-text">
+        <h2 class="np-performer" id="npPerformer"></h2>
+        <p class="np-set" id="npSet"></p>
+      </div>
+      <div class="deck" aria-hidden="true">
+        <div class="platter"></div>
+        <div class="disc"><div class="disc-label"><b>S&amp;S</b><small>Live · Side A</small></div></div>
+        <div class="sheen"></div>
+        <svg class="arm" id="arm" viewBox="0 0 40 112">
+          <circle cx="28" cy="12" r="9" fill="#1c1b22" stroke="#c9a96e" stroke-opacity="0.5"/>
+          <circle cx="28" cy="12" r="3.5" fill="#c9a96e"/>
+          <path d="M28 12 L23 88 L15 101" fill="none" stroke="#d9d4cc" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="9" y="97" width="11" height="8" rx="1.5" transform="rotate(-35 14.5 101)" fill="#c9a96e"/>
+        </svg>
+        <span class="rpm">33⅓ rpm</span>
+      </div>
+    </div>
+
+    <div class="wave-wrap" id="wave" tabindex="0" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="track"><div class="fill" id="fill"></div><div class="thumb" id="thumb"></div></div>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="prev" aria-label="Previous recording">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+      </button>
+      <button class="btn play" id="play" aria-label="Play">
+        <svg id="icPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icPause" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+      </button>
+      <button class="btn" id="next" aria-label="Next recording">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+      </button>
+      <div class="vol">
+        <button class="mute" id="mute" aria-label="Mute" aria-pressed="false">
+          <svg id="icVol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor" stroke="none"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg>
+          <svg id="icMuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" hidden><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor" stroke="none"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke-linecap="round"/></svg>
+        </button>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
+      </div>
+      <span class="time"><b id="cur">0:00</b> / <span id="tot">0:00</span></span>
+    </div>
+  </section>
+
+  <section class="archive" aria-label="Recordings">
+    <div class="archive-head"><h2>The Archive</h2></div>
+    <ol id="list"></ol>
+  </section>
+
+  <p class="note"><strong>Demo:</strong> performers and sets are examples, and the audio is short test tones standing in for real recordings. Each real set is one MP3 file plus one line of details.</p>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+
+<script>
+  // Each recording: swap `src` for a real file path, e.g. "audio/2026-10-03-ffion-hale.mp3"
+  const RECORDINGS = [
+    { src: "audio/2026-10-03-ffion-hale-trio.mp3", performer: "Ffion Hale Trio", set: "Late jazz standards, second set", date: "2026-10-03", genre: "Jazz" },
+    { src: "audio/2026-09-26-the-roath-ramblers.mp3", performer: "The Roath Ramblers", set: "Folk night — full set", date: "2026-09-26", genre: "Folk" },
+    { src: "audio/2026-09-18-open-mic-showcase.mp3", performer: "Open Mic Showcase", set: "Six acts, one evening", date: "2026-09-18", genre: "Open mic" }
+  ];
+
+  const $ = s => document.querySelector(s);
+  const audio = $('#audio'), app = $('#app'), wave = $('#wave');
+  let idx = 0, dragging = false;
+  const durations = {};
+
+  const fmt = t => { if (!isFinite(t)) return '0:00'; t = Math.floor(t); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  function draw() {
+    const prog = audio.duration ? audio.currentTime / audio.duration : 0;
+    const pct = (prog * 100).toFixed(2) + '%';
+    $('#fill').style.width = pct;
+    $('#thumb').style.left = pct;
+    wave.setAttribute('aria-valuenow', Math.round(prog * 100));
+    // Tonearm: rests off the record when stopped, tracks from outer groove to label as the set plays
+    const playing = app.classList.contains('playing');
+    $('#arm').style.transform = `rotate(${playing ? 9 + prog * 17 : -6}deg)`;
+  }
+
+  function renderList() {
+    $('#list').innerHTML = RECORDINGS.map((r, i) => {
+      const d = new Date(r.date + 'T12:00:00');
+      return `<li><button class="row${i === idx ? ' current' : ''}" data-i="${i}" aria-label="Play ${r.performer}, ${fmtDate(r.date)}">
+        <span class="date"><span class="d">${d.getDate()}</span><span class="m">${d.toLocaleDateString('en-GB', { month: 'short' })}</span></span>
+        <span class="info"><span class="p">${r.performer}</span><span class="s">${r.set}</span></span>
+        <span class="right"><span class="eq"><i></i><i></i><i></i></span><span class="tag">${r.genre}</span><span class="dur">${durations[i] ? fmt(durations[i]) : '–:––'}</span></span>
+      </button></li>`;
+    }).join('');
+  }
+
+  function load(i, autoplay) {
+    idx = (i + RECORDINGS.length) % RECORDINGS.length;
+    const r = RECORDINGS[idx];
+    audio.src = r.src;
+    $('#npPerformer').textContent = r.performer;
+    $('#npSet').textContent = r.set;
+    $('#cur').textContent = '0:00';
+    renderList(); draw();
+    if (autoplay) audio.play().catch(() => {});
+  }
+
+  function setPlaying(on) {
+    app.classList.toggle('playing', on);
+    $('#icPlay').toggleAttribute('hidden', on); $('#icPause').toggleAttribute('hidden', !on);
+    $('#play').setAttribute('aria-label', on ? 'Pause' : 'Play');
+    draw();
+  }
+
+  $('#play').addEventListener('click', () => audio.paused ? audio.play().catch(() => {}) : audio.pause());
+  $('#prev').addEventListener('click', () => load(idx - 1, true));
+  $('#next').addEventListener('click', () => load(idx + 1, true));
+  $('#list').addEventListener('click', e => {
+    const b = e.target.closest('.row'); if (!b) return;
+    const i = +b.dataset.i;
+    if (i === idx) { audio.paused ? audio.play().catch(() => {}) : audio.pause(); }
+    else load(i, true);
+  });
+  function setMuted(m) {
+    audio.muted = m;
+    $('.vol').classList.toggle('muted', m);
+    $('#icVol').toggleAttribute('hidden', m);
+    $('#icMuted').toggleAttribute('hidden', !m);
+    $('#mute').setAttribute('aria-label', m ? 'Unmute' : 'Mute');
+    $('#mute').setAttribute('aria-pressed', String(m));
+  }
+  $('#mute').addEventListener('click', () => setMuted(!audio.muted));
+  $('#volume').addEventListener('input', e => { audio.volume = +e.target.value; if (audio.muted) setMuted(false); });
+
+  audio.addEventListener('play', () => setPlaying(true));
+  audio.addEventListener('pause', () => setPlaying(false));
+  audio.addEventListener('ended', () => load(idx + 1, idx + 1 < RECORDINGS.length));
+  audio.addEventListener('loadedmetadata', () => { durations[idx] = audio.duration; $('#tot').textContent = fmt(audio.duration); renderList(); draw(); });
+  audio.addEventListener('timeupdate', () => { $('#cur').textContent = fmt(audio.currentTime); if (!dragging) draw(); });
+
+  function seekTo(clientX) {
+    const r = wave.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    if (audio.duration) { audio.currentTime = f * audio.duration; $('#cur').textContent = fmt(audio.currentTime); draw(); }
+  }
+  wave.addEventListener('pointerdown', e => { dragging = true; wave.setPointerCapture(e.pointerId); seekTo(e.clientX); });
+  wave.addEventListener('pointermove', e => { if (dragging) seekTo(e.clientX); });
+  wave.addEventListener('pointerup', () => { dragging = false; });
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input')) return;
+    if (e.key === 'ArrowRight') { load(idx + 1, true); e.preventDefault(); }
+    if (e.key === 'ArrowLeft') { load(idx - 1, true); e.preventDefault(); }
+    if (e.key === ' ' && !e.target.matches('button')) { $('#play').click(); e.preventDefault(); }
+  });
+
+  // Pre-read each file's duration for the list
+  RECORDINGS.forEach((r, i) => { const a = new Audio(); a.preload = 'metadata'; a.src = r.src; a.addEventListener('loadedmetadata', () => { durations[i] = a.duration; renderList(); }); });
+
+  window.addEventListener('resize', draw);
+  audio.volume = 0.8;
+  load(0, false);
+</script>
+</body>
+</html>
